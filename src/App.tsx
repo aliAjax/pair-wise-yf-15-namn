@@ -1,128 +1,128 @@
+import { useState } from "react";
 import "./styles.css";
+import { setOnline, syncNow, useStore } from "./store";
+import { fmtRelative } from "./utils";
+import { CasesView } from "./views/Cases";
+import { BatchesView } from "./views/Batches";
+import { TemperatureView } from "./views/Temperature";
+import { IdentifyView } from "./views/Identify";
+import { Toast } from "./components/ui";
 
-const project = {
-  "sourceNo": 5,
-  "id": "hxyfront-62003",
-  "port": 62003,
-  "title": "法医昆虫学样本记录",
-  "domain": "法医昆虫学",
-  "prompt": "做一个法医昆虫学样本记录前端工具，用来记录采样地点、环境温度、尸体暴露阶段、昆虫种类、发育阶段、采样时间、保存方式和鉴定备注。页面需要有样本批次列表、发育阶段筛选、温度记录图、案件样本关联页和单个样本详情卡片。",
-  "palette": [
-    "#365314",
-    "#a16207",
-    "#dc2626"
-  ],
-  "metrics": [
-    "样本批次",
-    "平均温度",
-    "发育阶段",
-    "待鉴定"
-  ],
-  "filters": [
-    "卵",
-    "幼虫",
-    "蛹",
-    "成虫"
-  ],
-  "fields": [
-    "采样地点",
-    "环境温度",
-    "暴露阶段",
-    "昆虫种类",
-    "发育阶段",
-    "保存方式"
-  ],
-  "records": [
-    [
-      "CASE-042-A",
-      "室外草地",
-      "幼虫三龄，28.6℃",
-      "乙醇保存"
-    ],
-    [
-      "CASE-042-B",
-      "阴影区域",
-      "蛹期样本",
-      "需复核种属"
-    ],
-    [
-      "CASE-051-A",
-      "水沟边缘",
-      "成虫采集",
-      "已完成拍照"
-    ]
-  ]
-};
+type Tab = "cases" | "batches" | "temperature" | "identify";
 
-function App() {
+const TABS: { key: Tab; label: string }[] = [
+  { key: "cases", label: "案件" },
+  { key: "batches", label: "采样批次" },
+  { key: "temperature", label: "温度记录" },
+  { key: "identify", label: "鉴定结论" },
+];
+
+export default function App() {
+  const { online, outbox, lastSyncAt, cases, batches, readings, identifications } = useStore();
+  const [tab, setTab] = useState<Tab>("cases");
+  const [toast, setToast] = useState("");
+
+  const unsynced =
+    cases.filter((c) => !c.synced).length +
+    batches.filter((b) => !b.synced).length +
+    readings.filter((r) => !r.synced).length +
+    identifications.filter((i) => !i.synced).length;
+
+  const doSync = () => {
+    const report = syncNow();
+    setToast(
+      `已合并 ${report.merged} 项本地变更，整理乱序读数 ${report.reordered} 条，识别断档 ${report.gaps} 处。`
+    );
+  };
+
   return (
-    <main className="app">
-      <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
-      </section>
+    <div className="app">
+      <header className="topbar">
+        <div className="topbar__brand">
+          <div className="topbar__title">
+            <span className="topbar__mark">法医昆虫学</span>
+            <h1>样本记录系统</h1>
+          </div>
+          <p className="topbar__sub">
+            现场按案件登记采样批次与环境温度，实验室鉴定暴露阶段与昆虫种属；离线本地暂存，联网合并，温度变动后积温重算。
+          </p>
+        </div>
 
-      <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
-          </article>
+        <div className="syncbar">
+          <div className={`syncbar__status ${online ? "is-online" : "is-offline"}`}>
+            <span className="syncbar__dot" />
+            {online ? "在线" : "离线"}
+          </div>
+          <div className="syncbar__meta">
+            {online ? (
+              <span>上次同步 {fmtRelative(lastSyncAt)}</span>
+            ) : (
+              <span>离线记录将保存在本机，联网后合并</span>
+            )}
+            {unsynced > 0 ? <span className="syncbar__pending">待同步 {unsynced}</span> : null}
+          </div>
+          <button
+            className="btn"
+            onClick={() => setOnline(!online)}
+            title="手动模拟联网 / 断网"
+          >
+            {online ? "模拟断网" : "模拟联网"}
+          </button>
+          <button className="btn btn--primary" onClick={doSync} disabled={!online}>
+            立即同步
+          </button>
+        </div>
+      </header>
+
+      <nav className="nav">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            className={tab === t.key ? "nav__btn nav__btn--active" : "nav__btn"}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+            {t.key === "identify" &&
+            identifications.some((i) => i.finalized && isOutdatedQuick(i, readings, batches)) ? (
+              <i className="nav__dot" />
+            ) : null}
+          </button>
         ))}
-      </section>
+      </nav>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
+      <main className="main">
+        {tab === "cases" && <CasesView />}
+        {tab === "batches" && <BatchesView />}
+        {tab === "temperature" && <TemperatureView />}
+        {tab === "identify" && <IdentifyView />}
+      </main>
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
+      <footer className="footer">
+        <span>数据保存在浏览器本地（localStorage），断网可用；定稿结论不可替换，过时结论以红色标记。</span>
+      </footer>
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-    </main>
+      {toast ? <Toast message={toast} onClose={() => setToast("")} /> : null}
+    </div>
   );
 }
 
-export default App;
+function isOutdatedQuick(
+  ident: { finalized: boolean; tempHash: string; batchId: string },
+  readings: { caseId: string; ts: number; value: number }[],
+  batches: { id: string; caseId: string }[]
+): boolean {
+  if (!ident.finalized || !ident.tempHash) return false;
+  const batch = batches.find((b) => b.id === ident.batchId);
+  if (!batch) return false;
+  const s = readings
+    .filter((r) => r.caseId === batch.caseId)
+    .sort((a, b) => a.ts - b.ts)
+    .map((r) => `${r.ts}:${r.value}`)
+    .join("|");
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36) !== ident.tempHash;
+}
